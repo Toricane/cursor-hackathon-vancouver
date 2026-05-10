@@ -6,8 +6,10 @@ import {
   GroupMessage,
   Reaction,
   REACTIONS,
+  RoundNarrative,
   RunRoundResult,
   SimulationState,
+  StanceShift,
   Utterance,
 } from './types';
 import { memoryStore } from './store/memoryStore';
@@ -19,7 +21,7 @@ import {
 } from '@/lib/llm/client';
 
 const GROUP_SIZE = 8;
-const EXCHANGES_PER_GROUP = 3;
+const EXCHANGES_PER_GROUP = 4;
 const GROUP_SYSTEM_PROMPT = [
   'You are running a live debate between specific named individuals. Each speaker must sound like a real, distinct person — not a policy paper, not a press release.',
   '',
@@ -539,6 +541,102 @@ async function runSummaryAndStances(args: {
   };
 }
 
+function fallbackRoundNarrative(
+  state: SimulationState,
+  nextRound: number,
+  groups: GroupConversation[],
+  reactionCounts: Record<Reaction, number>,
+): string {
+  const total = groups.reduce((sum, g) => sum + g.memberIds.length, 0) || state.citizens.length;
+  const topReaction = [...REACTIONS].sort(
+    (a, b) => reactionCounts[b] - reactionCounts[a],
+  )[0];
+  const groupCount = groups.length;
+  return `Round ${nextRound - 1}: ${groupCount} group${groupCount === 1 ? '' : 's'} of ${total} citizens debated "${state.question}". After the exchanges, ${reactionCounts[topReaction]} of ${state.citizens.length} land on a ${topReaction.toLowerCase()} stance.`;
+}
+
+function describeShifts(shifts: StanceShift[], limit = 12) {
+  if (shifts.length === 0) return 'No citizens shifted their stance this round.';
+  const head = shifts
+    .slice(0, limit)
+    .map((s) => `- ${s.name} (#${s.citizenId}): ${s.from} → ${s.to}`);
+  if (shifts.length > limit) {
+    head.push(`- (+${shifts.length - limit} more shifts)`);
+  }
+  return head.join('\n');
+}
+
+async function summarizeRound(args: {
+  state: SimulationState;
+  nextRound: number;
+  groups: GroupConversation[];
+  reactionCounts: Record<Reaction, number>;
+  stanceShifts: StanceShift[];
+}): Promise<RoundNarrative> {
+  const { state, nextRound, groups, reactionCounts, stanceShifts } = args;
+  const fallbackText = fallbackRoundNarrative(state, nextRound, groups, reactionCounts);
+
+  if (groups.length === 0) {
+    return { round: nextRound - 1, text: fallbackText, stanceShifts };
+  }
+
+  const groupSummaries = groups
+    .map((g) => `Group ${g.groupId} (${g.memberIds.length} agents): ${g.summary}`)
+    .join('\n');
+
+  const prompt = [
+    `Policy question: ${state.question}`,
+    `Shared context: ${state.context || '(none provided)'}`,
+    `Reaction counts after this round: ${JSON.stringify(reactionCounts)}`,
+    `Total citizens who shifted stance this round: ${stanceShifts.length}`,
+    'Stance shifts (FROM → TO):',
+    describeShifts(stanceShifts),
+    'Per-group summaries from this round:',
+    groupSummaries,
+    '',
+    'Write a 3-4 sentence narrative round summary that pulls together what happened across all groups this round.',
+    'Focus on: the dominant arguments that landed, the strongest disagreements, who shifted (name at least one specific person from the shifts list and what moved them), and where the population is heading overall.',
+    'Reference specific groups, moments, or named citizens where useful. No bullet points. No "the population was divided" generic framing. No policy-memo phrasing like "rigorous studies", "concrete commitments", or "comprehensive assessment".',
+    '',
+    'Return JSON only:',
+    '{"summary":"..."}',
+  ].join('\n');
+
+  try {
+    const parsed = await callGroupModelAndParse<{ summary?: string }>({
+      modelId: state.composerModel,
+      composerModel: state.composerModel,
+      label: 'round/summary',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are the Composer for a civic simulation, narrating how an entire round of debate unfolded across many small groups.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    });
+
+    const text =
+      typeof parsed.summary === 'string' && parsed.summary.trim().length > 0
+        ? parsed.summary.trim()
+        : fallbackText;
+
+    return { round: nextRound - 1, text, stanceShifts };
+  } catch (error) {
+    console.error('[simulation/round] failed to generate round narrative with CloD; using fallback', error);
+    if (error instanceof CloDRequestError) {
+      console.error(
+        `[simulation/round] CloD details: status=${error.status} model=${error.model} endpoint=${error.endpoint} details=${error.details}`,
+      );
+    }
+    if (shouldRethrowLlmError(error)) {
+      throw error;
+    }
+    return { round: nextRound - 1, text: fallbackText, stanceShifts };
+  }
+}
+
 function fallbackGroupConversation(
   state: SimulationState,
   members: Citizen[],
@@ -733,6 +831,7 @@ export async function createSimulation(input: CreateSimulationInput): Promise<Si
     reactionCounts: computeReactionCounts(citizens),
     recentUtterances: [],
     groups: [],
+    latestRoundNarrative: null,
     composerChat: [
       {
         role: 'composer',
@@ -804,6 +903,38 @@ export async function runRound(id: string, _speakerCount?: number): Promise<RunR
     )
     .slice(0, 10);
 
+  const projectedCitizens = previous.citizens.map((citizen) => {
+    const stance = stanceById.get(citizen.id);
+    if (!stance) return citizen;
+    return {
+      ...citizen,
+      reaction: stance.reaction,
+      lastMessage: stance.text,
+    };
+  });
+  const projectedCounts = computeReactionCounts(projectedCitizens);
+
+  const stanceShifts: StanceShift[] = [];
+  for (const citizen of previous.citizens) {
+    const stance = stanceById.get(citizen.id);
+    if (!stance) continue;
+    if (stance.reaction === citizen.reaction) continue;
+    stanceShifts.push({
+      citizenId: citizen.id,
+      name: citizen.name,
+      from: citizen.reaction,
+      to: stance.reaction,
+    });
+  }
+
+  const roundNarrative = await summarizeRound({
+    state: previous,
+    nextRound: previous.round + 1,
+    groups,
+    reactionCounts: projectedCounts,
+    stanceShifts,
+  });
+
   const updated = memoryStore.update(id, (state) => {
     const nextCitizens = state.citizens.map((citizen) => {
       const stance = stanceById.get(citizen.id);
@@ -822,6 +953,7 @@ export async function runRound(id: string, _speakerCount?: number): Promise<RunR
       reactionCounts: computeReactionCounts(nextCitizens),
       recentUtterances,
       groups,
+      latestRoundNarrative: roundNarrative,
       updatedAt: Date.now(),
     };
   });

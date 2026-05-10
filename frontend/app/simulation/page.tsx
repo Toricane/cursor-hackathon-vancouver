@@ -234,6 +234,8 @@ export default function SimulationPage() {
   const [isRoundLoading, setIsRoundLoading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [thoughtsCollapsed, setThoughtsCollapsed] = useState(false);
+  const [roundSummaryCollapsed, setRoundSummaryCollapsed] = useState(false);
 
   const selected = useMemo(
     () => state?.citizens.find((citizen) => citizen.id === selectedId) ?? null,
@@ -504,6 +506,71 @@ export default function SimulationPage() {
           background: #f8f8fa; border: 1px dashed #e0e0e0;
           border-radius: 12px;
         }
+        .round-summary-card {
+          background: linear-gradient(135deg, #f4f8ff 0%, #f8f4ff 100%);
+          border: 1px solid #e2e6f3;
+          border-radius: 14px;
+          padding: 12px 14px;
+          display: flex; flex-direction: column; gap: 7px;
+          margin-bottom: 8px;
+        }
+        .round-summary-head {
+          display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+        }
+        .round-summary-title {
+          font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+          text-transform: uppercase; color: #3a86ff;
+        }
+        .round-summary-meta {
+          font-size: 11px; color: #86868b; letter-spacing: -0.1px;
+        }
+        .round-summary-text {
+          font-size: 12.5px; line-height: 1.55; color: #1d1d1f;
+          letter-spacing: -0.05px;
+        }
+        .round-shifts {
+          background: rgba(255,255,255,0.65);
+          border: 1px solid #e6e9f3;
+          border-radius: 10px;
+          padding: 8px 10px;
+          display: flex; flex-direction: column; gap: 6px;
+        }
+        .round-shifts-head {
+          display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+        }
+        .round-shifts-title {
+          font-size: 10px; font-weight: 600; letter-spacing: 0.4px;
+          text-transform: uppercase; color: #86868b;
+        }
+        .round-shifts-count {
+          font-size: 10.5px; font-weight: 600; color: #1d1d1f; letter-spacing: -0.1px;
+        }
+        .round-shifts-empty {
+          font-size: 11.5px; color: #86868b; line-height: 1.4;
+        }
+        .round-shifts-list {
+          display: flex; flex-direction: column; gap: 4px;
+          max-height: 180px; overflow-y: auto;
+        }
+        .round-shift {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 11.5px; color: #1d1d1f;
+          padding: 3px 0;
+        }
+        .round-shift-name {
+          font-weight: 600; color: #1d1d1f; letter-spacing: -0.1px;
+          flex: 1; min-width: 0;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .round-shift-pill {
+          font-size: 9.5px; font-weight: 600; letter-spacing: 0.2px;
+          color: #fff; border-radius: 9999px;
+          padding: 2px 7px;
+          flex-shrink: 0;
+        }
+        .round-shift-arrow {
+          color: #86868b; font-size: 11px; flex-shrink: 0;
+        }
         .group-card {
           appearance: none; text-align: left;
           background: #f8f8fa;
@@ -699,6 +766,13 @@ export default function SimulationPage() {
           flex-direction: column;
           gap: 6px;
         }
+        .round-thoughts.collapsed { gap: 0; }
+        .round-thoughts-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
         .round-thoughts-title {
           font-size: 10px;
           font-weight: 600;
@@ -706,6 +780,29 @@ export default function SimulationPage() {
           color: #86868b;
           text-transform: uppercase;
         }
+        .collapse-btn {
+          appearance: none;
+          background: transparent;
+          border: 0;
+          color: #86868b;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          text-transform: uppercase;
+          padding: 2px 4px;
+          border-radius: 6px;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          transition: color 0.12s, background 0.12s;
+        }
+        .collapse-btn:hover { color: #1d1d1f; background: #f5f5f7; }
+        .collapse-caret {
+          font-size: 9px;
+          line-height: 1;
+          transition: transform 0.15s ease;
+        }
+        .collapse-caret.collapsed { transform: rotate(-90deg); }
         .round-thought-item {
           font-size: 11.5px;
           line-height: 1.4;
@@ -793,6 +890,10 @@ export default function SimulationPage() {
           box-shadow: 0 28px 80px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.05);
           overflow: hidden;
           animation: grp-mb-in 0.18s cubic-bezier(0.34,1.2,0.64,1);
+          color: #1d1d1f;
+          font-family: 'Inter', system-ui, -apple-system, sans-serif;
+          -webkit-font-smoothing: antialiased;
+          color-scheme: light;
         }
         @keyframes grp-mb-in {
           from { opacity: 0; transform: translateY(14px) scale(0.97); }
@@ -806,6 +907,7 @@ export default function SimulationPage() {
         }
         .grp-modal-title {
           font-size: 15px; font-weight: 600; letter-spacing: -0.3px;
+          color: #1d1d1f;
         }
         .grp-modal-sub {
           font-size: 12px; color: #86868b; margin-top: 2px;
@@ -903,6 +1005,7 @@ export default function SimulationPage() {
         }
         .grp-msg-name {
           font-size: 12px; font-weight: 600; letter-spacing: -0.2px;
+          color: #1d1d1f;
         }
         .grp-msg-reaction {
           font-size: 10px; font-weight: 600; letter-spacing: 0.2px;
@@ -927,6 +1030,7 @@ export default function SimulationPage() {
         .grp-stance-body { flex: 1; min-width: 0; }
         .grp-stance-name {
           font-size: 12.5px; font-weight: 600; letter-spacing: -0.2px;
+          color: #1d1d1f;
         }
         .grp-stance-reaction {
           font-size: 10.5px; font-weight: 500; color: #86868b;
@@ -1007,9 +1111,65 @@ export default function SimulationPage() {
                 </span>
               </div>
               <div className="groups-list">
+                {state?.latestRoundNarrative && (
+                  <div className="round-summary-card">
+                    <div className="round-summary-head">
+                      <span className="round-summary-title">Round {state.latestRoundNarrative.round} summary</span>
+                      <button
+                        className="collapse-btn"
+                        onClick={() => setRoundSummaryCollapsed((v) => !v)}
+                        aria-expanded={!roundSummaryCollapsed}
+                        aria-label={roundSummaryCollapsed ? 'Expand round summary' : 'Collapse round summary'}
+                      >
+                        <span className={`collapse-caret${roundSummaryCollapsed ? ' collapsed' : ''}`}>▾</span>
+                        {roundSummaryCollapsed ? 'Show' : 'Hide'}
+                      </button>
+                    </div>
+                    {!roundSummaryCollapsed && (
+                      <>
+                        <div className="round-summary-text">{state.latestRoundNarrative.text}</div>
+                        <div className="round-shifts">
+                          <div className="round-shifts-head">
+                            <span className="round-shifts-title">Stance shifts</span>
+                            <span className="round-shifts-count">
+                              {state.latestRoundNarrative.stanceShifts.length} of {state.citizens.length} changed
+                            </span>
+                          </div>
+                          {state.latestRoundNarrative.stanceShifts.length === 0 ? (
+                            <div className="round-shifts-empty">No citizens shifted their stance this round.</div>
+                          ) : (
+                            <div className="round-shifts-list">
+                              {state.latestRoundNarrative.stanceShifts.map((shift) => (
+                                <div className="round-shift" key={shift.citizenId}>
+                                  <span className="round-shift-name">{shift.name}</span>
+                                  <span
+                                    className="round-shift-pill"
+                                    style={{ background: REACTION_COLORS[shift.from] }}
+                                  >
+                                    {shift.from}
+                                  </span>
+                                  <span className="round-shift-arrow">→</span>
+                                  <span
+                                    className="round-shift-pill"
+                                    style={{ background: REACTION_COLORS[shift.to] }}
+                                  >
+                                    {shift.to}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="round-summary-meta">
+                          Synthesized from {state.groups.length} group{state.groups.length === 1 ? '' : 's'} · {modelLabel(state.composerModel)}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {(state?.groups ?? []).length === 0 && (
                   <div className="groups-empty">
-                    Run a round to surface group summaries. Each round splits the population into groups of {8} for a three-exchange conversation.
+                    Run a round to surface group summaries. Each round splits the population into groups of {8} for a four-exchange conversation.
                   </div>
                 )}
                 {(state?.groups ?? []).map((g) => {
@@ -1142,23 +1302,38 @@ export default function SimulationPage() {
                   <span style={{ fontSize: 10, color: '#3eb495', fontWeight: 600, letterSpacing: 0.3 }}>ONLINE</span>
                 </div>
               </div>
-              <div className="round-thoughts">
-                <div className="round-thoughts-title">Recent agent thoughts</div>
-                {(state?.recentUtterances ?? []).slice(0, 3).map((u) => {
-                  const c = citizensById.get(u.citizenId);
-                  return (
-                    <div className="round-thought-item" key={`${u.citizenId}-${u.text.slice(0, 12)}`}>
-                      <span
-                        className="round-thought-dot"
-                        style={{ background: REACTION_COLORS[u.reaction] }}
-                      />
-                      <b>{c?.name ?? `#${u.citizenId}`}</b>
-                      <span className="round-thought-text"> {u.text}</span>
-                    </div>
-                  );
-                })}
-                {(!state?.recentUtterances || state.recentUtterances.length === 0) && (
-                  <div className="round-thought-item">Run a round to see latest agent thoughts.</div>
+              <div className={`round-thoughts${thoughtsCollapsed ? ' collapsed' : ''}`}>
+                <div className="round-thoughts-head">
+                  <div className="round-thoughts-title">Recent agent thoughts</div>
+                  <button
+                    className="collapse-btn"
+                    onClick={() => setThoughtsCollapsed((v) => !v)}
+                    aria-expanded={!thoughtsCollapsed}
+                    aria-label={thoughtsCollapsed ? 'Expand recent agent thoughts' : 'Collapse recent agent thoughts'}
+                  >
+                    <span className={`collapse-caret${thoughtsCollapsed ? ' collapsed' : ''}`}>▾</span>
+                    {thoughtsCollapsed ? 'Show' : 'Hide'}
+                  </button>
+                </div>
+                {!thoughtsCollapsed && (
+                  <>
+                    {(state?.recentUtterances ?? []).slice(0, 3).map((u) => {
+                      const c = citizensById.get(u.citizenId);
+                      return (
+                        <div className="round-thought-item" key={`${u.citizenId}-${u.text.slice(0, 12)}`}>
+                          <span
+                            className="round-thought-dot"
+                            style={{ background: REACTION_COLORS[u.reaction] }}
+                          />
+                          <b>{c?.name ?? `#${u.citizenId}`}</b>
+                          <span className="round-thought-text"> {u.text}</span>
+                        </div>
+                      );
+                    })}
+                    {(!state?.recentUtterances || state.recentUtterances.length === 0) && (
+                      <div className="round-thought-item">Run a round to see latest agent thoughts.</div>
+                    )}
+                  </>
                 )}
               </div>
               <div className="chat-log">

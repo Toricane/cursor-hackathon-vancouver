@@ -73,6 +73,19 @@ export interface RoundSummary {
   reactionDeltas: Record<Reaction, number>;
 }
 
+export interface StanceShift {
+  citizenId: number;
+  name: string;
+  from: Reaction;
+  to: Reaction;
+}
+
+export interface RoundNarrative {
+  round: number;
+  text: string;
+  stanceShifts: StanceShift[];
+}
+
 export interface SimulationState {
   id: string;
   question: string;
@@ -85,6 +98,7 @@ export interface SimulationState {
   reactionCounts: Record<Reaction, number>;
   recentUtterances: Utterance[];
   groups: GroupConversation[];
+  latestRoundNarrative: RoundNarrative | null;
   composerChat: ComposerChatMessage[];
   createdAt: number;
   updatedAt: number;
