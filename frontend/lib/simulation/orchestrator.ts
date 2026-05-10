@@ -575,7 +575,7 @@ function fallbackGroupConversation(
 
   return {
     groupId,
-    round: state.round + 1,
+    round: state.round,
     modelId,
     memberIds: members.map((m) => m.id),
     exchanges,
@@ -638,7 +638,7 @@ async function runGroup(args: {
 
     return {
       groupId,
-      round: state.round + 1,
+      round: state.round,
       modelId,
       memberIds: members.map((m) => m.id),
       exchanges,
@@ -688,7 +688,7 @@ export async function createSimulation(input: CreateSimulationInput): Promise<Si
     age: clamp(Math.floor(g?.age ?? base.age), 18, 90),
     profession: g?.profession?.trim() || base.profession,
     income: clamp(Math.floor(g?.income ?? base.income), 15000, 500000),
-    reaction: normalizeReaction(g?.reaction),
+    reaction: g?.reaction ? normalizeReaction(g.reaction) : base.reaction,
   });
 
   const results = await Promise.allSettled(

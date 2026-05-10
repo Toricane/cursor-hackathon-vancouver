@@ -6,6 +6,11 @@ interface SimulationStore {
   update(id: string, updater: (state: SimulationState) => SimulationState): SimulationState | null;
 }
 
+// NOTE: This is a single-process in-memory store. It works locally and survives Next.js
+// HMR via globalThis, but it is NOT durable across serverless invocations: on Vercel each
+// Lambda has its own process, so a request routed to a different instance than the one
+// that created a simulation will get a 404. Tracking Supabase migration as the persistence
+// layer (see SocietyAI_Hackathon.md) before deploying to a multi-instance environment.
 declare global {
   var __societySimulationStore: Map<string, SimulationState> | undefined;
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 const VENDORS: Record<string, { dot: string; icon: string }> = {
@@ -296,8 +296,6 @@ interface Row {
   population: number;
 }
 
-let nextId = 3;
-
 export default function CreatePage() {
   const router = useRouter();
   const [composer, setComposer] = useState('claude-sonnet-4-5');
@@ -305,6 +303,7 @@ export default function CreatePage() {
     { uid: 1, modelId: 'claude-sonnet-4-5', calls: 10, population: 8 },
     { uid: 2, modelId: 'gpt-5',             calls: 10, population: 8 },
   ]);
+  const nextIdRef = useRef(3);
   const [context, setContext] = useState('');
   const [launched, setLaunched] = useState(false);
   const [isLaunching, setIsLaunching] = useState(false);
@@ -321,7 +320,8 @@ export default function CreatePage() {
     if (pickerFor === 'composer') {
       setComposer(id);
     } else if (pickerFor === 'new') {
-      const uid = nextId++;
+      const uid = nextIdRef.current;
+      nextIdRef.current += 1;
       setRows((p) => [...p, { uid, modelId: id, calls: 10, population: 8 }]);
     } else if (pickerFor !== null) {
       updateRow(pickerFor as number, 'modelId', id);
