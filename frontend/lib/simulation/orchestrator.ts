@@ -145,8 +145,26 @@ function shouldRethrowLlmError(error: unknown) {
   return error.message.toLowerCase().includes('api key not configured');
 }
 
+const RETRYABLE_CLOD_STATUSES = new Set([
+  400, // bad request / unknown model on this endpoint
+  408, // request timeout (also used for our client-side AbortError)
+  409, // conflict (occasionally seen with concurrent calls)
+  425, // too early
+  429, // rate limited
+  500, // upstream server error
+  502, // bad gateway
+  503, // service unavailable
+  504, // gateway timeout
+  520, // Cloudflare: unknown
+  521, // Cloudflare: web server is down
+  522, // Cloudflare: connection timed out
+  523, // Cloudflare: origin is unreachable
+  524, // Cloudflare: a timeout occurred
+  525, // Cloudflare: SSL handshake failed
+]);
+
 function isRetryableModelError(error: unknown) {
-  return error instanceof CloDRequestError && error.status === 400;
+  return error instanceof CloDRequestError && RETRYABLE_CLOD_STATUSES.has(error.status);
 }
 
 function normalizeReaction(raw: string | undefined): Reaction {
@@ -307,7 +325,11 @@ async function callGroupModelAndParse<T>(args: {
       throw error;
     }
 
-    const reason = error instanceof LlmJsonParseError ? 'malformed JSON' : 'CloD 400';
+    const reason = error instanceof LlmJsonParseError
+      ? 'malformed JSON'
+      : error instanceof CloDRequestError
+        ? `CloD ${error.status}`
+        : 'transient error';
     console.warn(
       `[simulation/${args.label}] model "${args.modelId}" returned ${reason}; retrying with composer model "${args.composerModel}".`,
     );

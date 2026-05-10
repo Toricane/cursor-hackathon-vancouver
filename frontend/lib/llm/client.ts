@@ -34,7 +34,7 @@ export class CloDRequestError extends Error {
   }
 }
 
-function resolveApiKey() {
+export function resolveApiKey() {
   return process.env.CloD_API_KEY || process.env.CLOD_API_KEY || process.env.P_CLOD;
 }
 
@@ -94,22 +94,33 @@ const MODEL_ALIASES: Record<string, string> = {
   'trinity-mini':       'Trinity Mini',
 };
 
-function resolveModel(model: string) {
+function envAliases(): Record<string, string> | null {
   const byEnv = process.env.CLOD_MODEL_ALIASES?.trim();
-  if (byEnv) {
-    try {
-      const parsed = JSON.parse(byEnv) as Record<string, string>;
-      if (parsed[model]) {
-        return parsed[model];
-      }
-    } catch {
-      // ignore malformed env alias map
-    }
+  if (!byEnv) return null;
+  try {
+    return JSON.parse(byEnv) as Record<string, string>;
+  } catch {
+    return null;
   }
+}
+
+export function resolveModel(model: string) {
+  const env = envAliases();
+  if (env?.[model]) return env[model];
   return MODEL_ALIASES[model] || model;
 }
 
-function resolveEndpoint() {
+export function isKnownModel(model: string): boolean {
+  if (typeof model !== 'string' || !model.trim()) return false;
+  const trimmed = model.trim();
+  if (trimmed in MODEL_ALIASES) return true;
+  if (Object.values(MODEL_ALIASES).includes(trimmed)) return true;
+  const env = envAliases();
+  if (env && (trimmed in env || Object.values(env).includes(trimmed))) return true;
+  return false;
+}
+
+export function resolveEndpoint() {
   const configured = process.env.ENDPOINT || process.env.CLOD_ENDPOINT || process.env.E_CLOD;
   if (configured && configured.trim().length > 0) {
     return configured.trim();
@@ -117,10 +128,13 @@ function resolveEndpoint() {
   return 'https://api.clod.io/v1';
 }
 
+const DEFAULT_TIMEOUT_MS = Number(process.env.CLOD_REQUEST_TIMEOUT_MS) || 75_000;
+
 export async function clodChatCompletion(args: {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
+  timeoutMs?: number;
 }) {
   const apiKey = resolveApiKey();
   if (!apiKey) {
@@ -129,18 +143,38 @@ export async function clodChatCompletion(args: {
 
   const endpoint = resolveEndpoint();
   const resolvedModel = resolveModel(args.model);
-  const response = await fetch(`${endpoint}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: resolvedModel,
-      messages: args.messages,
-      temperature: args.temperature ?? 1,
-    }),
-  });
+  const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(`${endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: resolvedModel,
+        messages: args.messages,
+        temperature: args.temperature ?? 1,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timer);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new CloDRequestError({
+        status: 408,
+        model: `${args.model}${resolvedModel !== args.model ? ` -> ${resolvedModel}` : ''}`,
+        endpoint,
+        details: `Client-side timeout after ${timeoutMs}ms`,
+      });
+    }
+    throw error;
+  }
+  clearTimeout(timer);
 
   const rawBody = await response.text();
   let data: CloDChatResponse = {};
