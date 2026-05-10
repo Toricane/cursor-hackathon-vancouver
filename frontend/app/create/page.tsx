@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 const VENDORS: Record<string, { dot: string; icon: string }> = {
   'Anthropic':     { dot: '#cc785c', icon: 'https://www.google.com/s2/favicons?domain=anthropic.com&sz=32' },
@@ -298,6 +299,7 @@ interface Row {
 let nextId = 3;
 
 export default function CreatePage() {
+  const router = useRouter();
   const [composer, setComposer] = useState('claude-sonnet-4-5');
   const [rows, setRows] = useState<Row[]>([
     { uid: 1, modelId: 'claude-sonnet-4-5', calls: 10, population: 8 },
@@ -305,6 +307,8 @@ export default function CreatePage() {
   ]);
   const [context, setContext] = useState('');
   const [launched, setLaunched] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<'composer' | 'new' | number | null>(null);
 
   const composerModel = MODELS.find((m) => m.id === composer) || MODELS[0];
@@ -329,10 +333,44 @@ export default function CreatePage() {
   const totalCalls = rows.reduce((s, r) => s + r.calls, 0);
   const canLaunch  = rows.length > 0;
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     if (!canLaunch) return;
-    setLaunched(true);
-    setTimeout(() => setLaunched(false), 2500);
+    setLaunchError(null);
+    setIsLaunching(true);
+
+    try {
+      const response = await fetch('/api/simulations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          composerModel: composer,
+          populationModels: rows.map((r) => ({
+            modelId: r.modelId,
+            calls: r.calls,
+            population: r.population,
+          })),
+          context,
+          question: context.trim() || 'Should Vancouver build a taller downtown skyline?',
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || 'Failed to create simulation');
+      }
+
+      const body = (await response.json()) as { simulationId: string };
+      setLaunched(true);
+      setTimeout(() => {
+        setLaunched(false);
+        router.push(`/simulation?sid=${body.simulationId}`);
+      }, 500);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setLaunchError(message);
+    } finally {
+      setIsLaunching(false);
+    }
   };
 
   return (
@@ -562,6 +600,7 @@ export default function CreatePage() {
         .btn-launch:active { transform: scale(0.95); }
         .btn-launch:disabled { background: #c7c7cc; cursor: not-allowed; }
         .btn-launch.success { background: #1c8a4a; }
+        .launch-error { font-size: 12px; color: #b42318; margin-top: 6px; }
 
         /* Modal */
         .modal-overlay {
@@ -813,13 +852,14 @@ export default function CreatePage() {
               <b>{rows.length}</b> model{rows.length === 1 ? '' : 's'}&nbsp;·&nbsp;
               <b>{totalPop}</b>&nbsp;individuals&nbsp;·&nbsp;
               <b>{totalCalls}</b> LLM calls
+              {launchError && <div className="launch-error">{launchError}</div>}
             </div>
             <button
               className={`btn-launch${launched ? ' success' : ''}`}
-              disabled={!canLaunch}
+              disabled={!canLaunch || isLaunching}
               onClick={handleLaunch}
             >
-              {launched ? 'Sandbox created ✓' : 'Create sandbox →'}
+              {launched ? 'Sandbox created ✓' : isLaunching ? 'Creating...' : 'Create sandbox →'}
             </button>
           </div>
         </div>
