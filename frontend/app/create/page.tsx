@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
 const VENDORS: Record<string, { dot: string; icon: string }> = {
   'Anthropic':     { dot: '#cc785c', icon: 'https://www.google.com/s2/favicons?domain=anthropic.com&sz=32' },
@@ -35,15 +36,15 @@ const MODELS: Model[] = [
   { id: 'claude-opus-4-6',    name: 'Claude Opus 4.6',    vendor: 'Anthropic', inputPrice: 5.25,  outputPrice: 26.25 },
   { id: 'claude-opus-4-7',    name: 'Claude Opus 4.7',    vendor: 'Anthropic', inputPrice: 5.25,  outputPrice: 26.25 },
   // OpenAI
-  { id: 'gpt-4o',          name: 'GPT-4o',          vendor: 'OpenAI', inputPrice: 2.63,  outputPrice: 10.5  },
-  { id: 'gpt-4o-mini',     name: 'GPT-4o Mini',     vendor: 'OpenAI', inputPrice: 0.16,  outputPrice: 0.63  },
-  { id: 'gpt-4-turbo',     name: 'GPT-4 Turbo',     vendor: 'OpenAI', inputPrice: 10.5,  outputPrice: 31.5  },
-  { id: 'gpt-4-1',         name: 'GPT-4.1',         vendor: 'OpenAI', inputPrice: 2.1,   outputPrice: 8.4   },
-  { id: 'gpt-5',           name: 'GPT-5',           vendor: 'OpenAI', inputPrice: 1.31,  outputPrice: 10.5  },
-  { id: 'gpt-5-2',         name: 'GPT-5.2',         vendor: 'OpenAI', inputPrice: 1.84,  outputPrice: 14.7  },
-  { id: 'gpt-5-3-codex',   name: 'GPT 5.3 Codex',  vendor: 'OpenAI', inputPrice: 1.84,  outputPrice: 14.7  },
-  { id: 'gpt-5-mini',      name: 'GPT-5 Mini',      vendor: 'OpenAI', inputPrice: 0.26,  outputPrice: 2.1   },
-  { id: 'gpt-5-nano',      name: 'GPT-5 Nano',      vendor: 'OpenAI', inputPrice: 0.05,  outputPrice: 0.42  },
+  { id: 'gpt-4o',          name: 'GPT-4o',              vendor: 'OpenAI', inputPrice: 2.63,  outputPrice: 10.5  },
+  { id: 'gpt-4o-mini',     name: 'GPT-4o Mini',         vendor: 'OpenAI', inputPrice: 0.16,  outputPrice: 0.63  },
+  { id: 'gpt-4-turbo',     name: 'GPT-4 Turbo',         vendor: 'OpenAI', inputPrice: 10.5,  outputPrice: 31.5  },
+  { id: 'gpt-4-1',         name: 'GPT-4.1',             vendor: 'OpenAI', inputPrice: 2.1,   outputPrice: 8.4   },
+  { id: 'gpt-5',           name: 'GPT-5',               vendor: 'OpenAI', inputPrice: 1.31,  outputPrice: 10.5  },
+  { id: 'gpt-5-2',         name: 'GPT-5.2',             vendor: 'OpenAI', inputPrice: 1.84,  outputPrice: 14.7  },
+  { id: 'gpt-5-3-codex',   name: 'GPT 5.3 Codex',      vendor: 'OpenAI', inputPrice: 1.84,  outputPrice: 14.7  },
+  { id: 'gpt-5-mini',      name: 'GPT-5 Mini',          vendor: 'OpenAI', inputPrice: 0.26,  outputPrice: 2.1   },
+  { id: 'gpt-5-nano',      name: 'GPT-5 Nano',          vendor: 'OpenAI', inputPrice: 0.05,  outputPrice: 0.42  },
   { id: 'gpt-oss-120b',    name: 'GPT OSS 120B',    vendor: 'OpenAI', inputPrice: 0.15,  outputPrice: 0.24, free: true },
   { id: 'gpt-oss-20b',     name: 'GPT OSS 20B',     vendor: 'OpenAI', inputPrice: 0.05,  outputPrice: 0.08, free: true },
   // Google
@@ -55,7 +56,7 @@ const MODELS: Model[] = [
   // Meta
   { id: 'llama-3-1-8b',        name: 'Llama 3.1 8B',                vendor: 'Meta', inputPrice: 0.05, outputPrice: 0.03 },
   { id: 'llama-3-3-70b',       name: 'Meta Llama 3.3 70B Instruct', vendor: 'Meta', inputPrice: 0.6,  outputPrice: 0.48, free: true },
-  { id: 'llama-3-3-70b-turbo', name: 'Llama 3.3 70B Turbo',         vendor: 'Meta', inputPrice: 0.88, outputPrice: 0.36 },
+  { id: 'llama-3-3-70b-turbo', name: 'Llama 3.3 70B Instruct Turbo', vendor: 'Meta', inputPrice: 0.88, outputPrice: 0.36 },
   { id: 'llama-3-8b-lite',     name: 'Llama 3 8B Instruct Lite',    vendor: 'Meta', inputPrice: 0.1,  outputPrice: 0.04 },
   // xAI
   { id: 'grok-3', name: 'Grok 3', vendor: 'xAI', inputPrice: 3.15, outputPrice: 15.75 },
@@ -63,11 +64,11 @@ const MODELS: Model[] = [
   // DeepSeek
   { id: 'deepseek-r1',     name: 'DeepSeek R1',     vendor: 'DeepSeek', inputPrice: 3,    outputPrice: 2.83 },
   { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', vendor: 'DeepSeek', inputPrice: 2.1,  outputPrice: 1.78 },
-  { id: 'deepseek-v3-2',   name: 'DeepSeek V3.2',   vendor: 'DeepSeek', inputPrice: 0.56, outputPrice: 0.81 },
+  { id: 'deepseek-v3-2',   name: 'DeepSeek V3.2',   vendor: 'DeepSeek', inputPrice: 0.56, outputPrice: 0.98 },
   // Alibaba (Qwen)
-  { id: 'qwen-2-5-7b',  name: 'Qwen 2.5 7B Turbo',         vendor: 'Alibaba', inputPrice: 0.3,  outputPrice: 0.12 },
-  { id: 'qwen-3-235b',  name: 'Qwen 3 235B Thinking 2507', vendor: 'Alibaba', inputPrice: 0.65, outputPrice: 1.21, free: true },
-  { id: 'qwen-3-coder', name: 'Qwen 3 Coder 480B FP8',     vendor: 'Alibaba', inputPrice: 2,    outputPrice: 0.81, free: true },
+  { id: 'qwen-2-5-7b',  name: 'Qwen 2.5 7B Instruct Turbo',          vendor: 'Alibaba', inputPrice: 0.3,  outputPrice: 0.12 },
+  { id: 'qwen-3-235b',  name: 'Qwen 3 235B A22B Thinking 2507',      vendor: 'Alibaba', inputPrice: 0.65, outputPrice: 1.21, free: true },
+  { id: 'qwen-3-coder', name: 'Qwen 3 Coder 480B A35B Instruct FP8', vendor: 'Alibaba', inputPrice: 2,    outputPrice: 0.81, free: true },
   // Moonshot (Kimi)
   { id: 'kimi-k2-5', name: 'Kimi K2.5', vendor: 'Moonshot', inputPrice: 0.5,  outputPrice: 1.13 },
   { id: 'kimi-k2-6', name: 'Kimi K2.6', vendor: 'Moonshot', inputPrice: 1.2,  outputPrice: 1.82 },
@@ -141,10 +142,9 @@ function ModelBtn({ modelId, onClick }: { modelId: string; onClick: () => void }
       <span className="model-btn-name">{m.name}</span>
       {m.free && <span className="model-btn-free">Free</span>}
       <span className="model-btn-prices">
-        <span className="mbp-in">{fmtPrice(m.inputPrice)}</span>
-        <span className="mbp-dot">·</span>
-        <span className="mbp-out">{fmtPrice(m.outputPrice)}</span>
-        <span className="mbp-unit">/M</span>
+        {fmtPrice(m.inputPrice)}<span className="mbp-unit">/M</span><span className="mbp-sub">in</span>
+        <span className="mbp-sep">,</span>
+        {fmtPrice(m.outputPrice)}<span className="mbp-unit">/M</span><span className="mbp-sub">out</span>
       </span>
       <span className="model-btn-chevron">▾</span>
     </button>
@@ -252,12 +252,36 @@ function MiniStepper({
   min?: number;
   max?: number;
 }) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = (raw: string) => {
+    const n = parseInt(raw, 10);
+    if (!isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
+    setDraft(null);
+  };
+
   return (
     <div className="mini-stepper">
       <button onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min}>
         −
       </button>
-      <span className="mval">{value}</span>
+      {draft !== null ? (
+        <input
+          className="mval mval-input"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => commit(draft)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit(draft);
+            if (e.key === 'Escape') setDraft(null);
+          }}
+        />
+      ) : (
+        <span className="mval" style={{ cursor: 'text' }} onClick={() => setDraft(String(value))}>
+          {value}
+        </span>
+      )}
       <button onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max}>
         +
       </button>
@@ -272,16 +296,18 @@ interface Row {
   population: number;
 }
 
-let nextId = 3;
-
 export default function CreatePage() {
+  const router = useRouter();
   const [composer, setComposer] = useState('claude-sonnet-4-5');
   const [rows, setRows] = useState<Row[]>([
     { uid: 1, modelId: 'claude-sonnet-4-5', calls: 10, population: 8 },
     { uid: 2, modelId: 'gpt-5',             calls: 10, population: 8 },
   ]);
+  const nextIdRef = useRef(3);
   const [context, setContext] = useState('');
   const [launched, setLaunched] = useState(false);
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<'composer' | 'new' | number | null>(null);
 
   const composerModel = MODELS.find((m) => m.id === composer) || MODELS[0];
@@ -294,7 +320,8 @@ export default function CreatePage() {
     if (pickerFor === 'composer') {
       setComposer(id);
     } else if (pickerFor === 'new') {
-      const uid = nextId++;
+      const uid = nextIdRef.current;
+      nextIdRef.current += 1;
       setRows((p) => [...p, { uid, modelId: id, calls: 10, population: 8 }]);
     } else if (pickerFor !== null) {
       updateRow(pickerFor as number, 'modelId', id);
@@ -306,10 +333,44 @@ export default function CreatePage() {
   const totalCalls = rows.reduce((s, r) => s + r.calls, 0);
   const canLaunch  = rows.length > 0;
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
     if (!canLaunch) return;
-    setLaunched(true);
-    setTimeout(() => setLaunched(false), 2500);
+    setLaunchError(null);
+    setIsLaunching(true);
+
+    try {
+      const response = await fetch('/api/simulations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          composerModel: composer,
+          populationModels: rows.map((r) => ({
+            modelId: r.modelId,
+            calls: r.calls,
+            population: r.population,
+          })),
+          context,
+          question: context.trim() || 'Should Vancouver build a taller downtown skyline?',
+        }),
+      });
+
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error || 'Failed to create simulation');
+      }
+
+      const body = (await response.json()) as { simulationId: string };
+      setLaunched(true);
+      setTimeout(() => {
+        setLaunched(false);
+        router.push(`/simulation?sid=${body.simulationId}`);
+      }, 500);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setLaunchError(message);
+    } finally {
+      setIsLaunching(false);
+    }
   };
 
   return (
@@ -404,12 +465,11 @@ export default function CreatePage() {
         .model-btn-prices {
           font-size: 11px; color: #86868b; letter-spacing: -0.1px;
           flex-shrink: 0; white-space: nowrap;
-          display: flex; align-items: center; gap: 3px;
+          display: flex; align-items: baseline; gap: 1px;
         }
-        .mbp-in  { color: #3a7bd5; font-weight: 500; }
-        .mbp-out { color: #e07b54; font-weight: 500; }
-        .mbp-dot { color: #c7c7cc; }
         .mbp-unit { font-size: 10px; color: #b0b0b8; }
+        .mbp-sub  { font-size: 9px; color: #b0b0b8; }
+        .mbp-sep  { color: #c7c7cc; margin: 0 4px; }
         .model-btn-chevron {
           flex-shrink: 0; color: #b0b0b8; font-size: 11px; line-height: 1; margin-left: 2px;
         }
@@ -422,7 +482,8 @@ export default function CreatePage() {
           padding: 10px 12px;
           transition: background 0.15s;
         }
-        .model-row .model-btn { flex: 1; min-width: 0; background: #fff; }
+        .model-btns-pair { display: flex; gap: 6px; flex: 1; min-width: 0; }
+        .model-btns-pair .model-btn { flex: 1; min-width: 0; background: #fff; }
 
         .counter-group { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
         .counter-label { font-size: 11px; color: #86868b; letter-spacing: -0.1px; }
@@ -447,6 +508,11 @@ export default function CreatePage() {
           letter-spacing: -0.2px;
           border-left: 1px solid #e0e0e0; border-right: 1px solid #e0e0e0;
           height: 28px; line-height: 28px;
+        }
+        .mval-input {
+          width: 40px; border: 0; outline: 0; padding: 0;
+          background: transparent; font-family: inherit;
+          font-variant-numeric: tabular-nums;
         }
 
         .divider-label { width: 1px; height: 20px; background: #e0e0e0; margin: 0 2px; }
@@ -534,6 +600,7 @@ export default function CreatePage() {
         .btn-launch:active { transform: scale(0.95); }
         .btn-launch:disabled { background: #c7c7cc; cursor: not-allowed; }
         .btn-launch.success { background: #1c8a4a; }
+        .launch-error { font-size: 12px; color: #b42318; margin-top: 6px; }
 
         /* Modal */
         .modal-overlay {
@@ -783,15 +850,16 @@ export default function CreatePage() {
             <div className="launch-summary">
               Composer: <b>{composerModel.name}</b>&nbsp;·&nbsp;
               <b>{rows.length}</b> model{rows.length === 1 ? '' : 's'}&nbsp;·&nbsp;
-              <b>{totalPop}</b> individuals&nbsp;·&nbsp;
+              <b>{totalPop}</b>&nbsp;individuals&nbsp;·&nbsp;
               <b>{totalCalls}</b> LLM calls
+              {launchError && <div className="launch-error">{launchError}</div>}
             </div>
             <button
               className={`btn-launch${launched ? ' success' : ''}`}
-              disabled={!canLaunch}
+              disabled={!canLaunch || isLaunching}
               onClick={handleLaunch}
             >
-              {launched ? 'Sandbox created ✓' : 'Create sandbox →'}
+              {launched ? 'Sandbox created ✓' : isLaunching ? 'Creating...' : 'Create sandbox →'}
             </button>
           </div>
         </div>
