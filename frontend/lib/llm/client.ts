@@ -23,14 +23,22 @@ export class CloDRequestError extends Error {
   model: string;
   endpoint: string;
   details: string;
+  retryAfterMs?: number;
 
-  constructor(args: { status: number; model: string; endpoint: string; details: string }) {
+  constructor(args: {
+    status: number;
+    model: string;
+    endpoint: string;
+    details: string;
+    retryAfterMs?: number;
+  }) {
     super(`CloD request failed (${args.status}) for model "${args.model}": ${args.details}`);
     this.name = 'CloDRequestError';
     this.status = args.status;
     this.model = args.model;
     this.endpoint = args.endpoint;
     this.details = args.details;
+    this.retryAfterMs = args.retryAfterMs;
   }
 }
 
@@ -129,36 +137,103 @@ export function resolveEndpoint() {
 }
 
 const DEFAULT_TIMEOUT_MS = Number(process.env.CLOD_REQUEST_TIMEOUT_MS) || 75_000;
+const DEFAULT_MAX_RETRIES = Math.max(
+  0,
+  Math.min(8, Number(process.env.CLOD_MAX_RETRIES) || 4),
+);
+const DEFAULT_INITIAL_BACKOFF_MS = Math.max(
+  100,
+  Number(process.env.CLOD_INITIAL_BACKOFF_MS) || 600,
+);
+const DEFAULT_MAX_BACKOFF_MS = Math.max(
+  DEFAULT_INITIAL_BACKOFF_MS,
+  Number(process.env.CLOD_MAX_BACKOFF_MS) || 12_000,
+);
 
-export async function clodChatCompletion(args: {
-  model: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  timeoutMs?: number;
-}) {
-  const apiKey = resolveApiKey();
-  if (!apiKey) {
-    throw new Error('CloD API key not configured');
+// Statuses where a retry has any chance of succeeding (transient or rate
+// limited). 4xx outside this set generally mean a request shape problem and
+// should fail fast.
+const CLIENT_RETRYABLE_STATUSES = new Set([
+  408, // request timeout (also our client-side AbortError)
+  425, // too early
+  429, // rate limited
+  500, // upstream server error
+  502, // bad gateway
+  503, // service unavailable
+  504, // gateway timeout
+  520, // Cloudflare: unknown
+  521, // Cloudflare: web server is down
+  522, // Cloudflare: connection timed out
+  523, // Cloudflare: origin is unreachable
+  524, // Cloudflare: a timeout occurred
+  525, // Cloudflare: SSL handshake failed
+]);
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(headerValue: string | null): number | undefined {
+  if (!headerValue) return undefined;
+  const trimmed = headerValue.trim();
+  if (!trimmed) return undefined;
+
+  const asNumber = Number(trimmed);
+  if (Number.isFinite(asNumber) && asNumber >= 0) {
+    return Math.min(asNumber * 1000, 60_000);
   }
 
-  const endpoint = resolveEndpoint();
-  const resolvedModel = resolveModel(args.model);
-  const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const parsed = Date.parse(trimmed);
+  if (Number.isFinite(parsed)) {
+    const delta = parsed - Date.now();
+    if (delta > 0) return Math.min(delta, 60_000);
+  }
+  return undefined;
+}
+
+function computeBackoffMs(attempt: number, retryAfterMs: number | undefined) {
+  const exp = Math.min(
+    DEFAULT_MAX_BACKOFF_MS,
+    DEFAULT_INITIAL_BACKOFF_MS * 2 ** attempt,
+  );
+  const jitter = Math.floor(Math.random() * (exp / 2));
+  const base = Math.min(DEFAULT_MAX_BACKOFF_MS, exp + jitter);
+  if (retryAfterMs && retryAfterMs > base) {
+    return Math.min(retryAfterMs, DEFAULT_MAX_BACKOFF_MS);
+  }
+  return base;
+}
+
+interface SingleAttemptArgs {
+  apiKey: string;
+  endpoint: string;
+  resolvedModel: string;
+  originalModel: string;
+  messages: ChatMessage[];
+  temperature: number;
+  timeoutMs: number;
+}
+
+async function singleClodAttempt(args: SingleAttemptArgs): Promise<string> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+
+  const modelLabel = `${args.originalModel}${
+    args.resolvedModel !== args.originalModel ? ` -> ${args.resolvedModel}` : ''
+  }`;
 
   let response: Response;
   try {
-    response = await fetch(`${endpoint}/chat/completions`, {
+    response = await fetch(`${args.endpoint}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${args.apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: resolvedModel,
+        model: args.resolvedModel,
         messages: args.messages,
-        temperature: args.temperature ?? 1,
+        temperature: args.temperature,
       }),
       signal: controller.signal,
     });
@@ -167,9 +242,9 @@ export async function clodChatCompletion(args: {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new CloDRequestError({
         status: 408,
-        model: `${args.model}${resolvedModel !== args.model ? ` -> ${resolvedModel}` : ''}`,
-        endpoint,
-        details: `Client-side timeout after ${timeoutMs}ms`,
+        model: modelLabel,
+        endpoint: args.endpoint,
+        details: `Client-side timeout after ${args.timeoutMs}ms`,
       });
     }
     throw error;
@@ -187,14 +262,16 @@ export async function clodChatCompletion(args: {
   }
 
   if (!response.ok) {
-    const details = typeof data.error === 'string'
-      ? data.error
-      : rawBody.trim() || 'No error body returned';
+    const details =
+      typeof data.error === 'string'
+        ? data.error
+        : rawBody.trim() || 'No error body returned';
     throw new CloDRequestError({
       status: response.status,
-      model: `${args.model}${resolvedModel !== args.model ? ` -> ${resolvedModel}` : ''}`,
-      endpoint,
+      model: modelLabel,
+      endpoint: args.endpoint,
       details: details.slice(0, 700),
+      retryAfterMs: parseRetryAfterMs(response.headers.get('retry-after')),
     });
   }
 
@@ -207,6 +284,65 @@ export async function clodChatCompletion(args: {
   }
 
   throw new Error('CloD response missing assistant content');
+}
+
+export async function clodChatCompletion(args: {
+  model: string;
+  messages: ChatMessage[];
+  temperature?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
+}) {
+  const apiKey = resolveApiKey();
+  if (!apiKey) {
+    throw new Error('CloD API key not configured');
+  }
+
+  const endpoint = resolveEndpoint();
+  const resolvedModel = resolveModel(args.model);
+  const timeoutMs = args.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxRetries = Math.max(
+    0,
+    Math.min(8, args.maxRetries ?? DEFAULT_MAX_RETRIES),
+  );
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      return await singleClodAttempt({
+        apiKey,
+        endpoint,
+        resolvedModel,
+        originalModel: args.model,
+        messages: args.messages,
+        temperature: args.temperature ?? 1,
+        timeoutMs,
+      });
+    } catch (error) {
+      lastError = error;
+      const isCloDError = error instanceof CloDRequestError;
+      const status = isCloDError ? error.status : undefined;
+      const isRetryable = isCloDError && CLIENT_RETRYABLE_STATUSES.has(error.status);
+      const isLastAttempt = attempt === maxRetries;
+
+      if (!isRetryable || isLastAttempt) {
+        throw error;
+      }
+
+      const retryAfterMs = isCloDError ? error.retryAfterMs : undefined;
+      const delayMs = computeBackoffMs(attempt, retryAfterMs);
+      console.warn(
+        `[clod] retry ${attempt + 1}/${maxRetries} for model "${args.model}" after ${delayMs}ms (status ${status}${
+          retryAfterMs ? `, retry-after=${retryAfterMs}ms` : ''
+        })`,
+      );
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error('CloD request failed without an error instance');
 }
 
 export class LlmJsonParseError extends Error {

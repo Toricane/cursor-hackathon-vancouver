@@ -67,10 +67,30 @@ export interface ComposerChatMessage {
   createdAt: number;
 }
 
+export interface NiaSourceRef {
+  title: string;
+  url: string;
+  summary: string;
+  category: 'github' | 'documentation' | 'other';
+}
+
 export interface RoundSummary {
   round: number;
   speakerIds: number[];
   reactionDeltas: Record<Reaction, number>;
+}
+
+export interface StanceShift {
+  citizenId: number;
+  name: string;
+  from: Reaction;
+  to: Reaction;
+}
+
+export interface RoundNarrative {
+  round: number;
+  text: string;
+  stanceShifts: StanceShift[];
 }
 
 export interface SimulationState {
@@ -85,6 +105,8 @@ export interface SimulationState {
   reactionCounts: Record<Reaction, number>;
   recentUtterances: Utterance[];
   groups: GroupConversation[];
+  latestRoundNarrative: RoundNarrative | null;
+  niaSources: NiaSourceRef[];
   composerChat: ComposerChatMessage[];
   createdAt: number;
   updatedAt: number;
