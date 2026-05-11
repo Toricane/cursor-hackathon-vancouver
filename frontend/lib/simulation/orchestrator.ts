@@ -19,9 +19,57 @@ import {
   clodChatCompletion,
   parseJsonFromModel,
 } from '@/lib/llm/client';
+import {
+  NiaSource,
+  formatNiaSourcesForPrompt,
+  isNiaConfigured,
+  safeGroundQuery,
+} from '@/lib/nia/client';
 
 const GROUP_SIZE = 8;
 const EXCHANGES_PER_GROUP = 4;
+const GROUP_CONCURRENCY = Math.max(
+  1,
+  Math.min(8, Number(process.env.SIMULATION_GROUP_CONCURRENCY) || 3),
+);
+const GROUP_STAGGER_MS = Math.max(
+  0,
+  Math.min(1500, Number(process.env.SIMULATION_GROUP_STAGGER_MS) || 200),
+);
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<R>,
+  options: { concurrency: number; staggerMs?: number },
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  const concurrency = Math.max(1, Math.floor(options.concurrency));
+  const stagger = Math.max(0, Math.floor(options.staggerMs ?? 0));
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= items.length) return;
+      if (stagger > 0 && idx > 0) {
+        await sleep(stagger);
+      }
+      results[idx] = await worker(items[idx], idx);
+    }
+  };
+
+  const lanes = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    () => runWorker(),
+  );
+  await Promise.all(lanes);
+  return results;
+}
 const GROUP_SYSTEM_PROMPT = [
   'You are running a live debate between specific named individuals. Each speaker must sound like a real, distinct person — not a policy paper, not a press release.',
   '',
@@ -222,19 +270,30 @@ async function generateCitizenBatch(args: {
   context: string;
   batchSize: number;
   cohortLabel?: string;
+  niaSources?: NiaSource[];
 }): Promise<GeneratedCitizen[]> {
   type PopulationResponse = { citizens?: GeneratedCitizen[] };
+
+  const groundingBlock = args.niaSources && args.niaSources.length > 0
+    ? formatNiaSourcesForPrompt(args.niaSources)
+    : '';
 
   const prompt = [
     `Policy question: ${args.question}`,
     `Shared context: ${args.context || '(none provided)'}`,
+    groundingBlock
+      ? [
+          'Real-world web context (via Nia web search). Use these to ground the citizens you create — pull realistic place names, professions, statistics, fears, and stakes from this material when it fits the question. Do not parrot URLs or quote the sources verbatim.',
+          groundingBlock,
+        ].join('\n')
+      : '',
     args.cohortLabel
       ? `Generate exactly ${args.batchSize} citizens for the "${args.cohortLabel}" cohort of a civic simulation.`
       : `Generate exactly ${args.batchSize} citizens for a civic simulation.`,
     'Return JSON only in this shape:',
     '{"citizens":[{"name":"...","bio":"...","age":35,"profession":"Teacher","income":71000,"reaction":"Supportive|Neutral|Skeptical|Opposed|Undecided"}]}',
     'Do not include markdown or explanations.',
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   const raw = await clodChatCompletion({
     model: args.composerModel,
@@ -243,7 +302,7 @@ async function generateCitizenBatch(args: {
       {
         role: 'system',
         content:
-          'You are a civic simulation composer. Generate diverse, realistic synthetic residents.',
+          'You are a civic simulation composer. Generate diverse, realistic synthetic residents grounded in any real-world context provided.',
       },
       { role: 'user', content: prompt },
     ],
@@ -789,6 +848,17 @@ export async function createSimulation(input: CreateSimulationInput): Promise<Si
     reaction: g?.reaction ? normalizeReaction(g.reaction) : base.reaction,
   });
 
+  const niaSources = isNiaConfigured()
+    ? await safeGroundQuery({
+        query: context ? `${question} — ${context}` : question,
+        numResults: 6,
+      })
+    : [];
+
+  if (niaSources.length > 0) {
+    console.log(`[simulation/create] Nia returned ${niaSources.length} sources for grounding`);
+  }
+
   const results = await Promise.allSettled(
     cohorts.map((cohort) =>
       generateCitizenBatch({
@@ -797,6 +867,7 @@ export async function createSimulation(input: CreateSimulationInput): Promise<Si
         context,
         batchSize: cohort.entries.length,
         cohortLabel: cohort.modelId,
+        niaSources,
       }),
     ),
   );
@@ -832,6 +903,7 @@ export async function createSimulation(input: CreateSimulationInput): Promise<Si
     recentUtterances: [],
     groups: [],
     latestRoundNarrative: null,
+    niaSources,
     composerChat: [
       {
         role: 'composer',
@@ -872,8 +944,13 @@ export async function runRound(id: string, _speakerCount?: number): Promise<RunR
     ? previous.populationModels.map((m) => m.modelId)
     : [previous.composerModel];
 
-  const groups = await Promise.all(
-    chunks.map((members, idx) => {
+  console.log(
+    `[simulation/round] running ${chunks.length} group${chunks.length === 1 ? '' : 's'} with concurrency=${GROUP_CONCURRENCY}, stagger=${GROUP_STAGGER_MS}ms`,
+  );
+
+  const groups = await runWithConcurrency(
+    chunks,
+    async (members, idx) => {
       const groupRng = seededRandom((roundSeed ^ ((idx + 1) * 9173)) >>> 0);
       const modelId = modelPool[idx % modelPool.length] || previous.composerModel;
       return runGroup({
@@ -883,7 +960,8 @@ export async function runRound(id: string, _speakerCount?: number): Promise<RunR
         modelId,
         rng: groupRng,
       });
-    }),
+    },
+    { concurrency: GROUP_CONCURRENCY, staggerMs: GROUP_STAGGER_MS },
   );
 
   const stanceById = new Map<number, GroupFinalStance>();
@@ -1001,6 +1079,17 @@ export async function askComposer(id: string, message: string): Promise<Simulati
     current.recentUtterances.slice(0, 3).map((u) => `#${u.citizenId}`).join(', ') || 'none yet'
   }.`;
 
+  const askGroundingSources = isNiaConfigured()
+    ? await safeGroundQuery({
+        query: `${current.question} — ${cleanMessage}`,
+        numResults: 4,
+      })
+    : [];
+
+  const askGroundingBlock = askGroundingSources.length > 0
+    ? formatNiaSourcesForPrompt(askGroundingSources, { maxChars: 1200 })
+    : '';
+
   let answer = fallbackAnswer;
   try {
     const raw = await clodChatCompletion({
@@ -1010,7 +1099,7 @@ export async function askComposer(id: string, message: string): Promise<Simulati
         {
           role: 'system',
           content:
-            'You are the Composer for a civic simulation. Answer concisely and stay grounded in provided state.',
+            'You are the Composer for a civic simulation. Answer concisely and stay grounded in provided state. When real-world web context from Nia is provided, use it only if it is clearly relevant to the user\'s question — otherwise rely on the simulation state. Never invent URLs.',
         },
         {
           role: 'user',
@@ -1020,9 +1109,15 @@ export async function askComposer(id: string, message: string): Promise<Simulati
             `Current round: ${current.round}`,
             `Reaction counts: ${JSON.stringify(current.reactionCounts)}`,
             `Recent utterances: ${JSON.stringify(current.recentUtterances.slice(-5))}`,
+            askGroundingBlock
+              ? [
+                  'Real-world web context (via Nia, optional — use only if relevant):',
+                  askGroundingBlock,
+                ].join('\n')
+              : '',
             `User ask: ${cleanMessage}`,
             'Respond in 1-3 short sentences.',
-          ].join('\n'),
+          ].filter(Boolean).join('\n'),
         },
       ],
     });

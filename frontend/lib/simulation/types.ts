@@ -67,6 +67,13 @@ export interface ComposerChatMessage {
   createdAt: number;
 }
 
+export interface NiaSourceRef {
+  title: string;
+  url: string;
+  summary: string;
+  category: 'github' | 'documentation' | 'other';
+}
+
 export interface RoundSummary {
   round: number;
   speakerIds: number[];
@@ -99,6 +106,7 @@ export interface SimulationState {
   recentUtterances: Utterance[];
   groups: GroupConversation[];
   latestRoundNarrative: RoundNarrative | null;
+  niaSources: NiaSourceRef[];
   composerChat: ComposerChatMessage[];
   createdAt: number;
   updatedAt: number;

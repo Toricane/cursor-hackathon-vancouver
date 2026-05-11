@@ -236,6 +236,7 @@ export default function SimulationPage() {
   const [error, setError] = useState<string | null>(null);
   const [thoughtsCollapsed, setThoughtsCollapsed] = useState(false);
   const [roundSummaryCollapsed, setRoundSummaryCollapsed] = useState(false);
+  const [niaCollapsed, setNiaCollapsed] = useState(true);
 
   const selected = useMemo(
     () => state?.citizens.find((citizen) => citizen.id === selectedId) ?? null,
@@ -767,6 +768,86 @@ export default function SimulationPage() {
           gap: 6px;
         }
         .round-thoughts.collapsed { gap: 0; }
+
+        /* ─── Nia sources panel ─── */
+        .nia-panel {
+          border-bottom: 1px solid #f0f0f2;
+          padding: 10px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .nia-panel.collapsed { gap: 0; }
+        .nia-panel-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .nia-panel-title {
+          display: inline-flex; align-items: center; gap: 6px;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.3px;
+          color: #86868b;
+          text-transform: uppercase;
+        }
+        .nia-badge {
+          display: inline-flex; align-items: center;
+          background: linear-gradient(135deg, #6c4cff, #ff4cb1);
+          color: #fff;
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.5px;
+          border-radius: 9999px;
+          padding: 2px 7px;
+          text-transform: uppercase;
+        }
+        .nia-source-list {
+          display: flex; flex-direction: column; gap: 5px;
+          max-height: 180px; overflow-y: auto;
+        }
+        .nia-source-item {
+          display: flex; flex-direction: column; gap: 2px;
+          background: #f8f8fa;
+          border: 1px solid #ececef;
+          border-radius: 8px;
+          padding: 6px 8px;
+        }
+        .nia-source-link {
+          font-size: 11.5px;
+          font-weight: 600;
+          color: #1d1d1f;
+          letter-spacing: -0.1px;
+          text-decoration: none;
+          line-height: 1.35;
+          word-break: break-word;
+        }
+        .nia-source-link:hover { color: #0066cc; text-decoration: underline; }
+        .nia-source-meta {
+          display: flex; align-items: center; gap: 6px;
+        }
+        .nia-source-cat {
+          font-size: 8.5px; font-weight: 700; letter-spacing: 0.4px;
+          text-transform: uppercase;
+          color: #fff;
+          background: #86868b;
+          padding: 1px 6px; border-radius: 9999px;
+        }
+        .nia-source-cat.documentation { background: #3a86ff; }
+        .nia-source-cat.github { background: #1d1d1f; }
+        .nia-source-cat.other { background: #6c4cff; }
+        .nia-source-summary {
+          font-size: 11px; color: #4a4a52; line-height: 1.4;
+          letter-spacing: -0.05px;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .nia-empty {
+          font-size: 11px; color: #86868b; line-height: 1.4;
+        }
         .round-thoughts-head {
           display: flex;
           align-items: center;
@@ -1302,6 +1383,47 @@ export default function SimulationPage() {
                   <span style={{ fontSize: 10, color: '#3eb495', fontWeight: 600, letterSpacing: 0.3 }}>ONLINE</span>
                 </div>
               </div>
+              {state && state.niaSources && state.niaSources.length > 0 && (
+                <div className={`nia-panel${niaCollapsed ? ' collapsed' : ''}`}>
+                  <div className="nia-panel-head">
+                    <span className="nia-panel-title">
+                      <span className="nia-badge">Nia</span>
+                      Web context grounding · {state.niaSources.length} source{state.niaSources.length === 1 ? '' : 's'}
+                    </span>
+                    <button
+                      className="collapse-btn"
+                      onClick={() => setNiaCollapsed((v) => !v)}
+                      aria-expanded={!niaCollapsed}
+                      aria-label={niaCollapsed ? 'Expand Nia sources' : 'Collapse Nia sources'}
+                    >
+                      <span className={`collapse-caret${niaCollapsed ? ' collapsed' : ''}`}>▾</span>
+                      {niaCollapsed ? 'Show' : 'Hide'}
+                    </button>
+                  </div>
+                  {!niaCollapsed && (
+                    <div className="nia-source-list">
+                      {state.niaSources.map((src) => (
+                        <div className="nia-source-item" key={src.url}>
+                          <a
+                            className="nia-source-link"
+                            href={src.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                          >
+                            {src.title}
+                          </a>
+                          <div className="nia-source-meta">
+                            <span className={`nia-source-cat ${src.category}`}>{src.category}</span>
+                          </div>
+                          {src.summary && (
+                            <div className="nia-source-summary">{src.summary}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className={`round-thoughts${thoughtsCollapsed ? ' collapsed' : ''}`}>
                 <div className="round-thoughts-head">
                   <div className="round-thoughts-title">Recent agent thoughts</div>
